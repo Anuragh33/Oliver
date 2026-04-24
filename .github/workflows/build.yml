@@ -1,0 +1,66 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/**'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Release
+        run: swift build -c release
+
+      - name: Create .app Bundle
+        run: |
+          BUNDLE="build/Oliver.app"
+          mkdir -p "$BUNDLE/Contents/MacOS"
+          mkdir -p "$BUNDLE/Contents/Resources"
+          cp .build/release/Oliver "$BUNDLE/Contents/MacOS/Oliver"
+          cp Sources/Oliver/Info.plist "$BUNDLE/Contents/Info.plist"
+          chmod +x "$BUNDLE/Contents/MacOS/Oliver"
+
+      - name: Generate Icon
+        run: |
+          if [ -f "Sources/Oliver/Assets/AppIcon.png" ]; then
+            ICONSET="build/Oliver.iconset"
+            mkdir -p "$ICONSET"
+            SRC="Sources/Oliver/Assets/AppIcon.png"
+            sips -z 16 16 "$SRC" --out "$ICONSET/icon_16x16.png"
+            sips -z 32 32 "$SRC" --out "$ICONSET/icon_16x16@2x.png"
+            sips -z 32 32 "$SRC" --out "$ICONSET/icon_32x32.png"
+            sips -z 64 64 "$SRC" --out "$ICONSET/icon_32x32@2x.png"
+            sips -z 128 128 "$SRC" --out "$ICONSET/icon_128x128.png"
+            sips -z 256 256 "$SRC" --out "$ICONSET/icon_128x128@2x.png"
+            sips -z 256 256 "$SRC" --out "$ICONSET/icon_256x256.png"
+            sips -z 512 512 "$SRC" --out "$ICONSET/icon_256x256@2x.png"
+            sips -z 512 512 "$SRC" --out "$ICONSET/icon_512x512.png"
+            sips -z 1024 1024 "$SRC" --out "$ICONSET/icon_512x512@2x.png"
+            iconutil -c icns "$ICONSET" -o build/Oliver.icns
+            cp build/Oliver.icns "build/Oliver.app/Contents/Resources/AppIcon.icns"
+          fi
+
+      - name: Code Sign
+        run: |
+          xattr -cr build/Oliver.app
+          codesign --force --deep --sign - build/Oliver.app
+
+      - name: Create .dmg
+        run: |
+          DMG_STAGING=$(mktemp -d)
+          cp -R build/Oliver.app "$DMG_STAGING/"
+          ln -sf /Applications "$DMG_STAGING/Applications"
+          hdiutil create -volname "Oliver" -srcfolder "$DMG_STAGING" -ov -format UDZO build/Oliver.dmg
+          rm -rf "$DMG_STAGING"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Oliver.dmg
+          path: build/Oliver.dmg
