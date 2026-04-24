@@ -11,6 +11,8 @@ enum Page: String, CaseIterable {
     case chat = "Chat"
     case dashboard = "Dashboard"
     case audio = "Audio"
+    case devSpace = "Dev Space"
+    case responses = "Responses"
     case history = "History"
     case settings = "Settings"
     case shortcuts = "Shortcuts"
@@ -20,6 +22,8 @@ enum Page: String, CaseIterable {
         case .chat: return "bubble.left.and.bubble.right"
         case .dashboard: return "square.grid.2x2"
         case .audio: return "mic"
+        case .devSpace: return "chevron.left.forwardslash.chevron.right"
+        case .responses: return "text.bubble"
         case .history: return "clock.arrow.circlepath"
         case .settings: return "gearshape"
         case .shortcuts: return "keyboard"
@@ -82,68 +86,41 @@ struct SidebarView: View {
                 .foregroundStyle(.white)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.top, 16)
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
     }
 
     // MARK: - Footer
 
     private var footerArea: some View {
         VStack(spacing: 4) {
-            // Permission status indicators
             if !ScreenReaderService.hasAccessibilityPermission() {
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
+                        .font(.system(size: 9))
                         .foregroundStyle(.yellow)
                     Text("Accessibility")
                         .font(.system(size: 9))
                         .foregroundStyle(.yellow.opacity(0.8))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
             if !ScreenReaderService.hasScreenRecordingPermission() {
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
+                        .font(.system(size: 9))
                         .foregroundStyle(.yellow)
                     Text("Screen Record")
                         .font(.system(size: 9))
                         .foregroundStyle(.yellow.opacity(0.8))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if !SpeechService.hasPermission() {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.yellow)
-                    Text("Speech")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.yellow.opacity(0.8))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Divider()
-                .background(Color.white.opacity(0.1))
-                .padding(.horizontal, 10)
-
-            // Version
-            Text("v1.1")
+            Text("v1.1.0")
                 .font(.system(size: 9))
                 .foregroundStyle(.white.opacity(0.3))
-                .padding(.bottom, 10)
         }
+        .padding(.vertical, 8)
     }
 }
 
@@ -166,11 +143,11 @@ struct SidebarButton: View {
 
                 Spacer()
             }
-            .foregroundStyle(isSelected ? .white : .white.opacity(0.55))
+            .foregroundStyle(isSelected ? .white : .white.opacity(0.6))
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 6)
                     .fill(isSelected ? Color.white.opacity(0.12) : Color.clear)
             )
         }

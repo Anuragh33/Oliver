@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var speechService: SpeechService?
     var chatHistory: ChatHistoryManager?
     var launchAtLoginManager: LaunchAtLoginManager?
+    var systemAudioCapture: SystemAudioCapture?
 
     // Permission retry timers
     private var accessibilityRetryTimer: Timer?
@@ -41,13 +42,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         speechService = SpeechService()
         chatHistory = ChatHistoryManager()
         launchAtLoginManager = LaunchAtLoginManager()
+        systemAudioCapture = SystemAudioCapture()
 
         // Create overlay view and window
         overlayView = OverlayView(
             aiService: aiService!,
             screenReader: screenReader!,
             speechService: speechService!,
-            chatHistory: chatHistory!
+            chatHistory: chatHistory!,
+            systemAudio: systemAudioCapture!
         )
         overlayWindow = OverlayWindow(contentView: overlayView!)
 

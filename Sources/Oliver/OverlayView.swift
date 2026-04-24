@@ -9,12 +9,14 @@ class OverlayView: NSView {
     private let screenReader: ScreenReaderService
     private let speechService: SpeechService
     private let chatHistory: ChatHistoryManager
+    private let systemAudio: SystemAudioCapture
 
-    init(aiService: OllamaService, screenReader: ScreenReaderService, speechService: SpeechService, chatHistory: ChatHistoryManager) {
+    init(aiService: OllamaService, screenReader: ScreenReaderService, speechService: SpeechService, chatHistory: ChatHistoryManager, systemAudio: SystemAudioCapture) {
         self.aiService = aiService
         self.screenReader = screenReader
         self.speechService = speechService
         self.chatHistory = chatHistory
+        self.systemAudio = systemAudio
         super.init(frame: .zero)
         setupView()
     }
@@ -28,7 +30,8 @@ class OverlayView: NSView {
             aiService: aiService,
             screenReader: screenReader,
             speechService: speechService,
-            chatHistory: chatHistory
+            chatHistory: chatHistory,
+            systemAudio: systemAudio
         )
         let hosting = NSHostingView(rootView: contentView)
         hosting.translatesAutoresizingMaskIntoConstraints = false
@@ -54,15 +57,17 @@ struct OverlayRootView: View {
     @ObservedObject var navState: NavigationState
     @ObservedObject var speechService: SpeechService
     @ObservedObject var chatHistory: ChatHistoryManager
+    @ObservedObject var systemAudio: SystemAudioCapture
     @State private var inputText = ""
-    @State private var isExpanded = false
+    @State private var isExpanded = true  // Start expanded so users can see the UI immediately
     @State private var currentSessionId: UUID?
 
-    init(aiService: OllamaService, screenReader: ScreenReaderService, speechService: SpeechService, chatHistory: ChatHistoryManager) {
+    init(aiService: OllamaService, screenReader: ScreenReaderService, speechService: SpeechService, chatHistory: ChatHistoryManager, systemAudio: SystemAudioCapture) {
         self.viewModel = OverlayViewModel(aiService: aiService, screenReader: screenReader)
         self.navState = NavigationState()
         self.speechService = speechService
         self.chatHistory = chatHistory
+        self.systemAudio = systemAudio
     }
 
     var body: some View {
@@ -186,11 +191,15 @@ struct OverlayRootView: View {
         case .dashboard:
             DashboardPage(viewModel: viewModel)
         case .audio:
-            AudioPage(speechService: speechService, viewModel: viewModel)
+            AudioPage(speechService: speechService, viewModel: viewModel, systemAudio: systemAudio)
         case .settings:
             SettingsPage()
         case .shortcuts:
             ShortcutsPage()
+        case .devSpace:
+            DevSpacePage(viewModel: viewModel)
+        case .responses:
+            ResponsesPage(viewModel: viewModel)
         case .history:
             HistoryPage(chatHistory: chatHistory, viewModel: viewModel)
         }
@@ -330,6 +339,8 @@ struct SettingsPage: View {
     @AppStorage("autoCapture") private var autoCapture = false
     @AppStorage("captureInterval") private var captureInterval = 30.0
     @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @AppStorage("invisibleToSharing") private var invisibleToSharing = true
+    @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
 
     let models = ["deepseek-v3.2", "qwen3.5:397b", "glm-5.1", "kimi-k2.5", "gpt-oss:120b", "gemma4:31b"]
 
@@ -414,6 +425,32 @@ struct SettingsPage: View {
                     .onChange(of: launchAtLogin) { newValue in
                         updateLaunchAtLogin(newValue)
                     }
+
+                Toggle("Invisible to Screen Sharing", isOn: $invisibleToSharing)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+
+                if invisibleToSharing {
+                    Text("Overlay is hidden from Zoom, Meet, Teams, etc.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.green.opacity(0.7))
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                        Text("Overlay is VISIBLE to screen sharing apps!")
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                }
+
+                Toggle("Show Menu Bar Icon", isOn: $showMenuBarIcon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
 
                 Spacer()
             }

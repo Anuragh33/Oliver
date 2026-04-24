@@ -22,6 +22,12 @@ struct DashboardPage: View {
                         color: .green
                     )
                     StatusCard(
+                        icon: "eye.slash.fill",
+                        title: "Invisible",
+                        detail: UserDefaults.standard.object(forKey: "invisibleToSharing") == nil || UserDefaults.standard.bool(forKey: "invisibleToSharing") ? "Yes" : "No",
+                        color: (UserDefaults.standard.object(forKey: "invisibleToSharing") == nil || UserDefaults.standard.bool(forKey: "invisibleToSharing")) ? .green : .orange
+                    )
+                    StatusCard(
                         icon: "bubble.left.and.bubble.right",
                         title: "Messages",
                         detail: "\(viewModel.messages.count)",
@@ -97,6 +103,7 @@ struct DashboardPage: View {
 struct AudioPage: View {
     @ObservedObject var speechService: SpeechService
     @ObservedObject var viewModel: OverlayViewModel
+    @ObservedObject var systemAudio: SystemAudioCapture
     @AppStorage("sttProvider") private var sttProvider = "system"
 
     var body: some View {
@@ -120,71 +127,124 @@ struct AudioPage: View {
                     .pickerStyle(.segmented)
                 }
 
-                // Audio level meter
-                if speechService.isRecording {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Audio Level")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.6))
+                // Microphone recording section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Microphone")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
 
-                        AudioLevelBar(level: speechService.audioLevel)
+                    // Audio level meter
+                    if speechService.isRecording {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Audio Level")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.6))
+
+                            AudioLevelBar(level: speechService.audioLevel)
+                        }
                     }
-                }
 
-                // Record button
-                HStack(spacing: 12) {
-                    Button(action: {
-                        if speechService.isRecording {
-                            speechService.stopRecording()
-                            // Auto-send transcription as chat message
-                            let transcription = speechService.currentTranscription
-                            if !transcription.isEmpty {
-                                Task {
-                                    await viewModel.sendStreaming(message: transcription)
+                    // Record button
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            if speechService.isRecording {
+                                speechService.stopRecording()
+                                // Auto-send transcription as chat message
+                                let transcription = speechService.currentTranscription
+                                if !transcription.isEmpty {
+                                    Task {
+                                        await viewModel.sendStreaming(message: transcription)
+                                    }
+                                }
+                            } else {
+                                speechService.startRecording()
+                            }
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .fill(speechService.isRecording ? Color.red.opacity(0.2) : Color.blue.opacity(0.2))
+                                    .frame(width: 56, height: 56)
+
+                                if speechService.isRecording {
+                                    // Pulsing recording indicator
+                                    Circle()
+                                        .stroke(Color.red, lineWidth: 2)
+                                        .frame(width: 56, height: 56)
+                                        .scaleEffect(speechService.isRecording ? 1.2 : 1.0)
+                                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: speechService.isRecording)
+
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.red)
+                                        .frame(width: 20, height: 20)
+                                } else {
+                                    Image(systemName: "mic.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundStyle(.blue)
                                 }
                             }
-                        } else {
-                            speechService.startRecording()
                         }
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(speechService.isRecording ? Color.red.opacity(0.2) : Color.blue.opacity(0.2))
-                                .frame(width: 56, height: 56)
+                        .buttonStyle(.plain)
 
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(speechService.isRecording ? "Recording..." : "Tap to record")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.white)
                             if speechService.isRecording {
-                                // Pulsing recording indicator
-                                Circle()
-                                    .stroke(Color.red, lineWidth: 2)
-                                    .frame(width: 56, height: 56)
-                                    .scaleEffect(speechService.isRecording ? 1.2 : 1.0)
-                                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: speechService.isRecording)
-
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.red)
-                                    .frame(width: 20, height: 20)
-                            } else {
-                                Image(systemName: "mic.fill")
-                                    .font(.system(size: 22))
-                                    .foregroundStyle(.blue)
+                                Text("Speak now — auto-stops after \(Int(speechService.silenceTimeout))s of silence")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.white.opacity(0.5))
                             }
                         }
                     }
-                    .buttonStyle(.plain)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
+                }
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(speechService.isRecording ? "Recording..." : "Tap to record")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white)
-                        if speechService.isRecording {
-                            Text("Speak now — auto-stops after \(Int(speechService.silenceTimeout))s of silence")
+                // System Audio Capture section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("System Audio")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            if systemAudio.isCapturing {
+                                systemAudio.stopCapture()
+                            } else {
+                                systemAudio.startCapture()
+                            }
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .fill(systemAudio.isCapturing ? Color.orange.opacity(0.2) : Color.blue.opacity(0.2))
+                                    .frame(width: 44, height: 44)
+
+                                Image(systemName: systemAudio.isCapturing ? "stop.circle.fill" : "speaker.wave.2")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(systemAudio.isCapturing ? .orange : .blue)
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(systemAudio.isCapturing ? "Capturing system audio" : "Capture system audio")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white)
+                            Text("Records what's playing through your speakers")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+
+                        Spacer()
+
+                        if systemAudio.isCapturing {
+                            AudioLevelBar(level: systemAudio.audioLevel)
+                                .frame(width: 60)
                         }
                     }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
                 }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
 
                 // Live transcription (while recording)
                 if speechService.isRecording && !speechService.currentTranscription.isEmpty {
@@ -437,6 +497,261 @@ struct SessionRow: View {
         .onTapGesture {
             onSelect()
         }
+    }
+}
+
+// MARK: - Dev Space Page
+
+struct DevSpacePage: View {
+    @State private var codeText = ""
+    @State private var outputText = ""
+    @State private var selectedLanguage = "Python"
+    @ObservedObject var viewModel: OverlayViewModel
+    let languages = ["Python", "JavaScript", "Swift", "Rust", "Go", "SQL", "Shell"]
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header
+                HStack {
+                    Text("Dev Space")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    Spacer()
+
+                    // Language picker
+                    Picker("Language", selection: $selectedLanguage) {
+                        ForEach(languages, id: \.self) { lang in
+                            Text(lang).tag(lang)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .font(.system(size: 10))
+                }
+
+                // Code editor
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Code")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.6))
+
+                    TextEditor(text: $codeText)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.green.opacity(0.9))
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .frame(minHeight: 120, maxHeight: 200)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.4)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        )
+                }
+
+                // Action buttons
+                HStack(spacing: 8) {
+                    Button(action: {
+                        // Send code to AI for review/explanation
+                        Task {
+                            let prompt = "Explain or improve this \(selectedLanguage) code:\n```\n\(codeText)\n```"
+                            await viewModel.sendStreaming(message: prompt)
+                        }
+                    }) {
+                        Label("Ask AI", systemImage: "brain")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.15)))
+                    .disabled(codeText.isEmpty)
+
+                    Button(action: {
+                        // Capture screen context and ask AI about it
+                        viewModel.captureAndQuery()
+                    }) {
+                        Label("Capture + Ask", systemImage: "text.viewfinder")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.purple)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.purple.opacity(0.15)))
+
+                    Spacer()
+
+                    Button(action: {
+                        codeText = ""
+                    }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.3))
+                }
+
+                Divider()
+                    .background(Color.white.opacity(0.1))
+
+                // Notes / scratchpad area
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Notes")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.6))
+
+                    TextEditor(text: $outputText)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .frame(minHeight: 60, maxHeight: 120)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.3)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        )
+                }
+
+                Spacer()
+            }
+            .padding(16)
+        }
+    }
+}
+
+// MARK: - Responses Page
+
+struct ResponsesPage: View {
+    @ObservedObject var viewModel: OverlayViewModel
+    @State private var selectedMessageIndex: Int?
+    @State private var searchText = ""
+
+    /// All assistant responses
+    private var responses: [ChatMessageData] {
+        viewModel.messages.filter { $0.role == .assistant }
+    }
+
+    /// Filtered responses based on search
+    private var filteredResponses: [ChatMessageData] {
+        if searchText.isEmpty {
+            return responses
+        }
+        return responses.filter { $0.content.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header
+                HStack {
+                    Text("Responses")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    Spacer()
+
+                    Text("\(responses.count) responses")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+
+                // Search bar
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.4))
+
+                    TextField("Search responses...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.05)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+
+                if filteredResponses.isEmpty {
+                    // Empty state
+                    VStack(spacing: 12) {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.white.opacity(0.2))
+                        Text(searchText.isEmpty ? "No AI responses yet" : "No matching responses")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.4))
+                        Text("Chat with Oliver and responses will appear here")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                    .padding(.top, 30)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    // Response cards
+                    ForEach(Array(filteredResponses.enumerated()), id: \.offset) { index, response in
+                        ResponseCard(
+                            message: response,
+                            index: index,
+                            isSelected: selectedMessageIndex == index,
+                            onSelect: { selectedMessageIndex = index }
+                        )
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(16)
+        }
+    }
+}
+
+struct ResponseCard: View {
+    let message: ChatMessageData
+    let index: Int
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Header with index and time
+            HStack {
+                Text("#\(index + 1)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.blue.opacity(0.15)))
+
+                Spacer()
+
+                Text(message.timestamp, style: .time)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            // Content preview
+            Text(message.content)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(isSelected ? nil : 3)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.blue.opacity(0.1) : Color.white.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+        )
+        .onTapGesture { onSelect() }
     }
 }
 
