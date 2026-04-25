@@ -70,7 +70,7 @@ class MenuBarController {
     @objc private func showAbout() {
         let alert = NSAlert()
         alert.messageText = "Oliver"
-        alert.informativeText = "AI-powered overlay assistant\nInvisible to screen sharing\n\nBuilt with love by Anuragh\nv1.1.0"
+        alert.informativeText = "AI-powered overlay assistant\nInvisible to screen sharing\n\nBuilt with love by Anuragh\nv1.2.1\n\nPress Cmd+Shift+H to show/hide the overlay"
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()

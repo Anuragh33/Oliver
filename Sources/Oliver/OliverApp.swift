@@ -64,18 +64,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             capture: { [weak self] in self?.captureAndQuery() }
         )
 
-        // Check all required permissions on launch
-        checkPermissionsOnLaunch()
+        // Defer permission checks to avoid freezing macOS with system dialogs on launch
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.checkPermissionsOnLaunch()
+        }
 
         // Setup auto-capture timer (watches UserDefaults for changes)
         setupAutoCaptureTimer()
 
-        // Show overlay
-        overlayWindow?.show()
+        // DON'T auto-show the overlay — start hidden!
+        // User presses Cmd+Shift+H to show it. This prevents the full-screen
+        // transparent window from blocking all interaction on launch.
 
         print("[Oliver] App launched successfully!")
         print("[Oliver] Hotkeys: Cmd+Shift+H = toggle, Cmd+Shift+C = capture")
         print("[Oliver] Overlay is invisible to screen sharing (sharingType = .none)")
+        print("[Oliver] Press Cmd+Shift+H to show the overlay")
     }
 
     // MARK: - Permission Checks with Retry

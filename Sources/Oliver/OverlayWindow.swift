@@ -4,8 +4,8 @@ import SwiftUI
 /// The core overlay window — transparent, always on top, invisible to screen sharing
 /// Users can see and interact with it, but screen sharing apps (Zoom, Teams, etc.) cannot capture it
 class OverlayWindow: NSPanel {
-    var isHiddenByUser = false  // public so AppDelegate can check visibility
-    var isInteractive: Bool = true
+    var isHiddenByUser = true  // START HIDDEN — user activates via hotkey
+    var isInteractive: Bool = false  // Start non-interactive so we don't block the screen
 
     /// Whether the overlay is invisible to screen sharing (sharingType = .none)
     /// When false, the overlay is VISIBLE to screen sharing apps (normal window)
@@ -16,8 +16,16 @@ class OverlayWindow: NSPanel {
     }
 
     init(contentView: NSView) {
+        // Use a reasonable overlay size, NOT the full screen.
+        // Full-screen transparent window blocks ALL mouse events to other apps.
         let screen = NSScreen.main!
-        let rect = screen.visibleFrame
+        let screenRect = screen.visibleFrame
+        // Position in bottom-right corner, 580x420 (matches expanded UI)
+        let overlayWidth: CGFloat = 580
+        let overlayHeight: CGFloat = 470
+        let x = screenRect.maxX - overlayWidth - 20
+        let y = screenRect.minY + 20
+        let rect = NSRect(x: x, y: y, width: overlayWidth, height: overlayHeight)
 
         super.init(
             contentRect: rect,
@@ -43,9 +51,10 @@ class OverlayWindow: NSPanel {
         self.isMovableByWindowBackground = false
         self.hidesOnDeactivate = false
 
-        // Start as INTERACTIVE so users can see and use the overlay immediately
-        self.ignoresMouseEvents = false
-        isInteractive = true
+        // CRITICAL: Start as click-through so we don't block the entire screen
+        // User activates overlay via Cmd+Shift+H hotkey
+        self.ignoresMouseEvents = true
+        isInteractive = false
 
         self.contentView = contentView
 
@@ -76,8 +85,9 @@ class OverlayWindow: NSPanel {
         isHiddenByUser = false
         ignoresMouseEvents = false
         isInteractive = true
-        makeKeyAndOrderFront(nil)
-        orderFrontRegardless()
+        // Use orderFront instead of makeKeyAndOrderFront to avoid stealing
+        // keyboard focus from the user's active application
+        orderFront(nil)
     }
 
     func hide() {
@@ -89,22 +99,16 @@ class OverlayWindow: NSPanel {
         if isHiddenByUser {
             show()
         } else {
-            if isInteractive {
-                // If visible and interactive, collapse to click-through mode
-                // (second press: make click-through so you can work behind it)
-                disableInteraction()
-            } else {
-                // If click-through, hide entirely
-                hide()
-            }
+            hide()
         }
     }
 
     /// Enable mouse interaction on the overlay
+    /// Also make key so text input works (needed for chat input)
     func enableInteraction() {
         isInteractive = true
         ignoresMouseEvents = false
-        makeKey()
+        makeKey()  // Need key status for text fields to work
     }
 
     /// Disable mouse interaction (let clicks pass through)
