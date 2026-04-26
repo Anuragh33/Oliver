@@ -104,7 +104,11 @@ struct AudioPage: View {
     @ObservedObject var speechService: SpeechService
     @ObservedObject var viewModel: OverlayViewModel
     @ObservedObject var systemAudio: SystemAudioCapture
+    @ObservedObject var aiService: OllamaService
     @AppStorage("sttProvider") private var sttProvider = "system"
+    @State private var isTranscribing = false
+    @State private var whisperTranscription = ""
+    @State private var transcribeError = ""
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -125,6 +129,12 @@ struct AudioPage: View {
                         Text("OpenAI Whisper").tag("whisper")
                     }
                     .pickerStyle(.segmented)
+
+                    if sttProvider == "whisper" {
+                        Text("Uses OpenAI Whisper API for higher accuracy. Requires API key in Settings.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
                 }
 
                 // Microphone recording section
@@ -244,6 +254,76 @@ struct AudioPage: View {
                     }
                     .padding(10)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
+
+                    // Transcribe captured audio button
+                    if !systemAudio.isCapturing {
+                        Button(action: transcribeSystemAudio) {
+                            HStack(spacing: 6) {
+                                if isTranscribing {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .frame(width: 12, height: 12)
+                                } else {
+                                    Image(systemName: "doc.text.viewfinder")
+                                        .font(.system(size: 12))
+                                }
+                                Text(isTranscribing ? "Transcribing..." : "Transcribe captured audio")
+                                    .font(.system(size: 12))
+                            }
+                            .foregroundStyle(.white.opacity(0.8))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.purple.opacity(0.15)))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isTranscribing)
+                    }
+
+                    // Whisper transcription result
+                    if !whisperTranscription.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Transcription")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                Image(systemName: "waveform.badge.magnifyingglass")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.purple.opacity(0.7))
+                            }
+
+                            Text(whisperTranscription)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
+
+                            Button(action: {
+                                Task {
+                                    await viewModel.sendStreaming(message: whisperTranscription)
+                                }
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.up.circle.fill")
+                                        .font(.system(size: 12))
+                                    Text("Send as message")
+                                        .font(.system(size: 12))
+                                }
+                                .foregroundStyle(.blue)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.15)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    // Transcription error
+                    if !transcribeError.isEmpty {
+                        Text(transcribeError)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red.opacity(0.8))
+                    }
                 }
 
                 // Live transcription (while recording)
@@ -333,6 +413,36 @@ struct AudioPage: View {
                 Spacer()
             }
             .padding(16)
+        }
+    }
+
+    /// Transcribe system audio using Whisper API
+    private func transcribeSystemAudio() {
+        guard let wavData = systemAudio.exportWAV() else {
+            transcribeError = "No audio captured yet. Start and stop capture first."
+            return
+        }
+
+        isTranscribing = true
+        whisperTranscription = ""
+        transcribeError = ""
+
+        Task {
+            do {
+                let result = try await aiService.transcribeAudio(wavData: wavData)
+                await MainActor.run {
+                    whisperTranscription = result
+                    isTranscribing = false
+                    if result.isEmpty {
+                        transcribeError = "Transcription returned empty result."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    transcribeError = "Transcription failed: \(error.localizedDescription)"
+                    isTranscribing = false
+                }
+            }
         }
     }
 }

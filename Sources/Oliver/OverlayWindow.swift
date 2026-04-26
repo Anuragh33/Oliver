@@ -15,17 +15,29 @@ class OverlayWindow: NSPanel {
         }
     }
 
+    // Dynamic sizing from UserDefaults
+    var overlayWidth: CGFloat {
+        let width = UserDefaults.standard.double(forKey: "overlayWidth")
+        return width > 0 ? CGFloat(width) : 580
+    }
+
+    var overlayOpacity: Double {
+        let opacity = UserDefaults.standard.double(forKey: "overlayOpacity")
+        return opacity > 0 ? opacity : 0.85
+    }
+
     init(contentView: NSView) {
-        // Use a reasonable overlay size, NOT the full screen.
-        // Full-screen transparent window blocks ALL mouse events to other apps.
+        // Read settings for initial size
+        let width = UserDefaults.standard.double(forKey: "overlayWidth")
+        let effectiveWidth: CGFloat = width > 0 ? CGFloat(width) : 580
+        let overlayHeight: CGFloat = 470
+
+        // Position in bottom-right corner
         let screen = NSScreen.main!
         let screenRect = screen.visibleFrame
-        // Position in bottom-right corner, 580x420 (matches expanded UI)
-        let overlayWidth: CGFloat = 580
-        let overlayHeight: CGFloat = 470
-        let x = screenRect.maxX - overlayWidth - 20
+        let x = screenRect.maxX - effectiveWidth - 20
         let y = screenRect.minY + 20
-        let rect = NSRect(x: x, y: y, width: overlayWidth, height: overlayHeight)
+        let rect = NSRect(x: x, y: y, width: effectiveWidth, height: overlayHeight)
 
         super.init(
             contentRect: rect,
@@ -58,22 +70,41 @@ class OverlayWindow: NSPanel {
 
         self.contentView = contentView
 
-        // Listen for changes to invisibility preference
+        // Listen for changes to UserDefaults (width, opacity, invisibility)
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(invisibilityPrefChanged),
+            selector: #selector(userDefaultsChanged),
             name: UserDefaults.didChangeNotification,
             object: nil
         )
     }
 
-    @objc private func invisibilityPrefChanged() {
-        let newValue = UserDefaults.standard.object(forKey: "invisibleToSharing") == nil
+    @objc private func userDefaultsChanged() {
+        // Update invisibility
+        let newInvisible = UserDefaults.standard.object(forKey: "invisibleToSharing") == nil
             ? true
             : UserDefaults.standard.bool(forKey: "invisibleToSharing")
-        if newValue != isInvisibleToSharing {
-            isInvisibleToSharing = newValue
+        if newInvisible != isInvisibleToSharing {
+            isInvisibleToSharing = newInvisible
         }
+
+        // Update window width
+        resizeToSettings()
+    }
+
+    /// Resize the window to match the current UserDefaults width setting
+    func resizeToSettings() {
+        let newWidth = overlayWidth
+        let screen = NSScreen.main!
+        let screenRect = screen.visibleFrame
+        let x = screenRect.maxX - newWidth - 20
+        let currentFrame = self.frame
+        let newFrame = NSRect(x: x, y: currentFrame.origin.y, width: newWidth, height: currentFrame.height)
+
+        self.setFrame(newFrame, display: true, animate: !isHiddenByUser)
+
+        // Post notification so SwiftUI views can update
+        NotificationCenter.default.post(name: .overlaySizeChanged, object: nil)
     }
 
     // Allow this panel to become key so text fields work
@@ -136,4 +167,10 @@ class OverlayWindow: NSPanel {
     func toggleInvisibility() {
         isInvisibleToSharing.toggle()
     }
+}
+
+// MARK: - Notification for overlay size changes
+
+extension Notification.Name {
+    static let overlaySizeChanged = Notification.Name("overlaySizeChanged")
 }

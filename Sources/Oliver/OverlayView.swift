@@ -61,6 +61,8 @@ struct OverlayRootView: View {
     @State private var inputText = ""
     @State private var isExpanded = true  // Start expanded so users can see the UI immediately
     @State private var currentSessionId: UUID?
+    @AppStorage("overlayOpacity") private var overlayOpacity = 0.85
+    @AppStorage("overlayWidth") private var overlayWidth = 420.0
 
     init(aiService: OllamaService, screenReader: ScreenReaderService, speechService: SpeechService, chatHistory: ChatHistoryManager, systemAudio: SystemAudioCapture) {
         self.viewModel = OverlayViewModel(aiService: aiService, screenReader: screenReader)
@@ -94,10 +96,11 @@ struct OverlayRootView: View {
                     inputArea
                 }
             }
-            .frame(width: isExpanded ? 580 : 260)
+            .frame(width: isExpanded ? CGFloat(overlayWidth) : 260)
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(.ultraThinMaterial)
+                    .opacity(overlayOpacity)
                     .overlay(
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Color.white.opacity(0.15), lineWidth: 1)
@@ -108,6 +111,12 @@ struct OverlayRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding([.trailing, .bottom], 20)
+        .onReceive(NotificationCenter.default.publisher(for: .overlaySizeChanged)) { _ in
+            // Force layout update when overlay width changes
+            withAnimation(.easeInOut(duration: 0.2)) {
+                // The @AppStorage overlayWidth will automatically update
+            }
+        }
     }
 
     // MARK: - Header
@@ -191,7 +200,7 @@ struct OverlayRootView: View {
         case .dashboard:
             DashboardPage(viewModel: viewModel)
         case .audio:
-            AudioPage(speechService: speechService, viewModel: viewModel, systemAudio: systemAudio)
+            AudioPage(speechService: speechService, viewModel: viewModel, systemAudio: systemAudio, aiService: viewModel.aiService)
         case .settings:
             SettingsPage()
         case .shortcuts:
@@ -392,6 +401,17 @@ struct SettingsPage: View {
                 }
                 Slider(value: $overlayOpacity, in: 0.3...1.0, step: 0.05)
 
+                HStack {
+                    Text("Width")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.7))
+                    Spacer()
+                    Text("\(Int(overlayWidth))px")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                Slider(value: $overlayWidth, in: 280...600, step: 20)
+
                 Divider().background(Color.white.opacity(0.1))
 
                 // Auto-capture section
@@ -517,7 +537,7 @@ enum MessageRole: String, Codable { case user, assistant, system }
 struct ChatMessageData: Identifiable {
     let id = UUID()
     let role: MessageRole
-    var content: String
+    var content: String  // var for streaming token appending
     let timestamp = Date()
 }
 
@@ -527,7 +547,7 @@ class OverlayViewModel: ObservableObject {
     @Published var messages: [ChatMessageData] = []
     @Published var isStreaming = false
 
-    private let aiService: OllamaService
+    let aiService: OllamaService  // public so AudioPage can access it
     private let screenReader: ScreenReaderService
     var lastScreenContext: String?
 

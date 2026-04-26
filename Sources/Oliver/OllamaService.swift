@@ -65,7 +65,7 @@ class OllamaService: ObservableObject {
         return await sendChat(messages: messages)
     }
 
-    /// Stream a chat response — yields tokens as they arrive
+    /// Stream a chat response — yields tokens as they arrive using true SSE streaming
     func streamChat(messages: [ChatMessage]) -> AsyncThrowingStream<String, Error> {
         let url = URL(string: "\(baseURL)/chat/completions")!
 
@@ -88,37 +88,89 @@ class OllamaService: ObservableObject {
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        return AsyncThrowingStream { continuation in
-            let task = self.session.dataTask(with: request) { data, response, error in
-                if let error = error {
-                    continuation.finish(throwing: error)
-                    return
-                }
-
-                guard let data = data,
-                      let responseString = String(data: data, encoding: .utf8) else {
-                    continuation.finish()
-                    return
-                }
-
-                // Parse SSE stream
-                for line in responseString.components(separatedBy: "\n") {
-                    if line.hasPrefix("data: ") {
-                        let jsonStr = String(line.dropFirst(6))
-                        if jsonStr == "[DONE]" { continue }
-                        if let jsonData = jsonStr.data(using: .utf8),
-                           let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                           let choices = json["choices"] as? [[String: Any]],
-                           let delta = choices.first?["delta"] as? [String: Any],
-                           let content = delta["content"] as? String {
-                            continuation.yield(content)
-                        }
+        // Use AsyncStream.makeStream for proper token-by-token streaming
+        let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
+        
+        let delegate = SSEStreamDelegate(onData: { data in
+            // Parse SSE data line
+            for line in data.components(separatedBy: "\n") {
+                if line.hasPrefix("data: ") {
+                    let jsonStr = String(line.dropFirst(6))
+                    if jsonStr == "[DONE]" { return }
+                    if let jsonData = jsonStr.data(using: .utf8),
+                       let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                       let choices = json["choices"] as? [[String: Any]],
+                       let delta = choices.first?["delta"] as? [String: Any],
+                       let content = delta["content"] as? String {
+                        continuation.yield(content)
                     }
                 }
+            }
+        }, onComplete: { error in
+            if let error = error {
+                continuation.finish(throwing: error)
+            } else {
                 continuation.finish()
             }
-            task.resume()
+        })
+
+        // Use a dedicated URLSession with the SSE delegate for true streaming
+        let streamSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        let streamTask = streamSession.dataTask(with: request)
+        delegate.task = streamTask
+        continuation.onTermination = { @Sendable _ in
+            streamTask.cancel()
+            streamSession.invalidateAndCancel()
         }
+        streamTask.resume()
+        
+        return stream
+    }
+
+    /// Transcribe audio using Whisper API
+    func transcribeAudio(wavData: Data) async throws -> String {
+        let url = URL(string: "\(baseURL)/audio/transcriptions")!
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+
+        if let apiKey = apiKey {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+
+        // file field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append(wavData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        // model field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
+        body.append("whisper-1\r\n".data(using: .utf8)!)
+
+        // response_format field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
+        body.append("json\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        let (data, _) = try await session.data(for: request)
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let text = json["text"] as? String {
+            return text
+        }
+        return ""
     }
 
     /// Send a non-streaming chat request
@@ -155,6 +207,62 @@ class OllamaService: ObservableObject {
         } catch {
             return "Error: \(error.localizedDescription)"
         }
+    }
+}
+
+// MARK: - SSE Stream Delegate for true token-by-token streaming
+
+class SSEStreamDelegate: NSObject, URLSessionDataDelegate {
+    private let onData: (String) -> Void
+    private let onComplete: (Error?) -> Void
+    private var buffer = Data()
+    var task: URLSessionDataTask?
+    private let lock = NSLock()
+
+    init(onData: @escaping (String) -> Void, onComplete: @escaping (Error?) -> Void) {
+        self.onData = onData
+        self.onComplete = onComplete
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        buffer.append(data)
+        // Process the buffer for complete SSE events
+        processBuffer()
+        lock.unlock()
+    }
+
+    private func processBuffer() {
+        // SSE events are separated by double newlines
+        guard let text = String(data: buffer, encoding: .utf8) else { return }
+
+        // Check if we have at least one complete event (double newline)
+        let components = text.components(separatedBy: "\n\n")
+        if components.count > 1 {
+            // All but the last component are complete events
+            for i in 0..<(components.count - 1) {
+                let event = components[i]
+                onData(event)
+            }
+            // Keep the last (potentially incomplete) component in the buffer
+            let remaining = components.last ?? ""
+            buffer = remaining.data(using: .utf8) ?? Data()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        // Process any remaining data in buffer
+        if !buffer.isEmpty, let text = String(data: buffer, encoding: .utf8) {
+            onData(text)
+        }
+        buffer.removeAll()
+        lock.unlock()
+        onComplete(error)
+    }
+
+    func cancel() {
+        task?.cancel()
     }
 }
 

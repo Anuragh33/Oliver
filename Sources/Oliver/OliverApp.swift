@@ -36,26 +36,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Make the app a background/accessory app (no dock icon, no main menu)
         NSApp.setActivationPolicy(.accessory)
 
-        // Initialize services
-        aiService = OllamaService()
-        screenReader = ScreenReaderService()
-        speechService = SpeechService()
-        chatHistory = ChatHistoryManager()
-        launchAtLoginManager = LaunchAtLoginManager()
-        systemAudioCapture = SystemAudioCapture()
+        // Initialize services safely
+        let ai = OllamaService()
+        let reader = ScreenReaderService()
+        let speech = SpeechService()
+        let history = ChatHistoryManager()
+        let audio = SystemAudioCapture()
+
+        self.aiService = ai
+        self.screenReader = reader
+        self.speechService = speech
+        self.chatHistory = history
+        self.systemAudioCapture = audio
 
         // Create overlay view and window
-        overlayView = OverlayView(
-            aiService: aiService!,
-            screenReader: screenReader!,
-            speechService: speechService!,
-            chatHistory: chatHistory!,
-            systemAudio: systemAudioCapture!
+        let view = OverlayView(
+            aiService: ai,
+            screenReader: reader,
+            speechService: speech,
+            chatHistory: history,
+            systemAudio: audio
         )
-        overlayWindow = OverlayWindow(contentView: overlayView!)
+        self.overlayView = view
+        overlayWindow = OverlayWindow(contentView: view)
 
         // Menu bar controller
-        menuBarController = MenuBarController(overlayWindow: overlayWindow!)
+        guard let window = overlayWindow else { return }
+        menuBarController = MenuBarController(overlayWindow: window)
 
         // Register global hotkeys
         hotkeyManager = HotkeyManager()

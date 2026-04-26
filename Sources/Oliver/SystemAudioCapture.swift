@@ -14,6 +14,8 @@ class SystemAudioCapture: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var audioBuffer: [Data] = []
     private var sampleRate: Double = 44100
+    /// Preserved WAV data after capture stops — available for transcription
+    @Published var lastCapturedWAV: Data?
 
     /// Start capturing system audio output
     func startCapture() {
@@ -40,6 +42,7 @@ class SystemAudioCapture: ObservableObject {
             audioEngine = engine
             isCapturing = true
             audioBuffer.removeAll()
+            lastCapturedWAV = nil
             print("[SystemAudio] Capture started at \(sampleRate)Hz")
         } catch {
             print("[SystemAudio] Failed to start engine: \(error)")
@@ -47,7 +50,7 @@ class SystemAudioCapture: ObservableObject {
         }
     }
 
-    /// Stop capturing and return the recorded audio data
+    /// Stop capturing and save the WAV data for later transcription
     @discardableResult
     func stopCapture() -> Data? {
         guard isCapturing else { return nil }
@@ -55,11 +58,14 @@ class SystemAudioCapture: ObservableObject {
         audioEngine?.outputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
-        isCapturing = false
 
+        // Export WAV before clearing buffer
+        lastCapturedWAV = exportWAV()
+
+        isCapturing = false
         let data = audioBuffer.isEmpty ? nil : audioBuffer.reduce(Data()) { $0 + $1 }
         audioBuffer.removeAll()
-        print("[SystemAudio] Capture stopped, \(data?.count ?? 0) bytes recorded")
+        print("[SystemAudio] Capture stopped, \(data?.count ?? 0) bytes recorded, WAV: \(lastCapturedWAV?.count ?? 0) bytes")
         return data
     }
 
@@ -93,7 +99,10 @@ class SystemAudioCapture: ObservableObject {
 
     /// Export captured audio as WAV data (for transcription APIs)
     func exportWAV() -> Data? {
-        guard !audioBuffer.isEmpty else { return nil }
+        guard !audioBuffer.isEmpty else {
+            // Try last captured WAV data
+            return lastCapturedWAV
+        }
 
         // Simple WAV header + PCM data
         let totalDataSize = audioBuffer.reduce(0) { $0 + $1.count }

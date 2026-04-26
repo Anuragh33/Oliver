@@ -11,7 +11,10 @@ let package = Package(
         .executableTarget(
             name: "Oliver",
             path: "Sources/Oliver",
-            exclude: ["Info.plist", "Oliver.entitlements"]
+            exclude: ["Info.plist", "Oliver.entitlements"],
+            resources: [
+                .process("Assets")
+            ]
         )
     ]
 )
