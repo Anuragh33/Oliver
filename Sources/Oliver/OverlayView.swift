@@ -442,9 +442,16 @@ struct SettingsPage: View {
                     .foregroundStyle(.white)
                     .toggleStyle(.switch)
                     .controlSize(.small)
+                    .disabled(!LaunchAtLoginManager.isRunningAsApp)
                     .onChange(of: launchAtLogin) { newValue in
                         updateLaunchAtLogin(newValue)
                     }
+
+                if !LaunchAtLoginManager.isRunningAsApp {
+                    Text("Only available when running as .app bundle")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
 
                 Toggle("Invisible to Screen Sharing", isOn: $invisibleToSharing)
                     .font(.system(size: 12))
@@ -485,6 +492,7 @@ struct SettingsPage: View {
     }
 
     private func updateLaunchAtLogin(_ enabled: Bool) {
+        guard LaunchAtLoginManager.isRunningAsApp else { return }
         if #available(macOS 13.0, *) {
             do {
                 if enabled {

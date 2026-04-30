@@ -1,52 +1,62 @@
 import Foundation
 import AVFoundation
 import CoreAudio
+import ScreenCaptureKit
 
-/// Captures system audio (what's playing through the speakers) for transcription.
-/// Uses a tap on the default output device's audio stream.
-/// NOTE: Full system audio capture requires ScreenCapture permission on macOS.
-/// On macOS 13+, we use SCStreamConfiguration for system audio.
-/// On older macOS, we fall back to a process tap (requires entitlements).
-class SystemAudioCapture: ObservableObject {
+/// Captures system audio (what's playing through the speakers) using ScreenCaptureKit.
+/// NOTE: Requires Screen Recording permission (already requested by the app).
+@available(macOS 12.3, *)
+class SystemAudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegate {
     @Published var isCapturing = false
     @Published var audioLevel: Float = 0.0
 
+    private var audioStream: SCStream?
     private var audioEngine: AVAudioEngine?
     private var audioBuffer: [Data] = []
-    private var sampleRate: Double = 44100
-    /// Preserved WAV data after capture stops — available for transcription
+    private var sampleRate: Double = 48000
     @Published var lastCapturedWAV: Data?
 
-    /// Start capturing system audio output
+    /// Start capturing system audio output using ScreenCaptureKit
     func startCapture() {
         guard !isCapturing else { return }
 
-        let engine = AVAudioEngine()
-        let node = engine.outputNode
-        let format = node.outputFormat(forBus: 0)
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
 
-        guard format.sampleRate > 0 else {
-            print("[SystemAudio] Invalid sample rate from output node")
-            return
-        }
+                let config = SCStreamConfiguration()
+                // Audio-only capture — disable video to reduce overhead
+                config.capturesAudio = true
+                config.sampleRate = 48000
+                config.channelCount = 2
+                config.minimumFrameInterval = .zero
 
-        sampleRate = format.sampleRate
+                // Capture all system audio (no filter needed for audio-only)
+                guard let display = content.displays.first else {
+                    print("[SystemAudio] No displays found")
+                    await MainActor.run { self.isCapturing = false }
+                    return
+                }
+                let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
 
-        // Install a tap on the output node to capture system audio
-        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
-            self?.processAudioBuffer(buffer)
-        }
+                let stream = SCStream(filter: filter, configuration: config, delegate: self)
+                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue.global(qos: .userInitiated))
 
-        do {
-            try engine.start()
-            audioEngine = engine
-            isCapturing = true
-            audioBuffer.removeAll()
-            lastCapturedWAV = nil
-            print("[SystemAudio] Capture started at \(sampleRate)Hz")
-        } catch {
-            print("[SystemAudio] Failed to start engine: \(error)")
-            node.removeTap(onBus: 0)
+                try await stream.startCapture()
+
+                self.audioStream = stream
+                self.isCapturing = true
+                self.audioBuffer.removeAll()
+                self.lastCapturedWAV = nil
+                self.sampleRate = 48000
+
+                print("[SystemAudio] ScreenCaptureKit capture started at \(self.sampleRate)Hz")
+            } catch {
+                print("[SystemAudio] Failed to start ScreenCaptureKit: \(error)")
+                await MainActor.run {
+                    self.isCapturing = false
+                }
+            }
         }
     }
 
@@ -55,61 +65,82 @@ class SystemAudioCapture: ObservableObject {
     func stopCapture() -> Data? {
         guard isCapturing else { return nil }
 
-        audioEngine?.outputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioEngine = nil
+        isCapturing = false
+
+        if let stream = audioStream {
+            stream.stopCapture { error in
+                if let error = error {
+                    print("[SystemAudio] Stop capture error: \(error)")
+                }
+            }
+            audioStream = nil
+        }
 
         // Export WAV before clearing buffer
         lastCapturedWAV = exportWAV()
 
-        isCapturing = false
         let data = audioBuffer.isEmpty ? nil : audioBuffer.reduce(Data()) { $0 + $1 }
         audioBuffer.removeAll()
-        print("[SystemAudio] Capture stopped, \(data?.count ?? 0) bytes recorded, WAV: \(lastCapturedWAV?.count ?? 0) bytes")
+        print("[SystemAudio] Capture stopped, WAV: \(lastCapturedWAV?.count ?? 0) bytes")
         return data
     }
 
-    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
-        // Calculate audio level (RMS)
-        if let channelData = buffer.floatChannelData?[0] {
-            let frameCount = Int(buffer.frameLength)
-            var sum: Float = 0
-            for i in 0..<frameCount {
-                sum += channelData[i] * channelData[i]
-            }
-            let rms = sqrt(sum / Float(frameCount))
-            DispatchQueue.main.async { [weak self] in
-                self?.audioLevel = rms
+    // MARK: - SCStreamOutput
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio, CMSampleBufferGetNumSamples(sampleBuffer) > 0 else { return }
+
+        // Calculate audio level
+        if let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+            let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+            if let asbd = asbd {
+                self.sampleRate = asbd.pointee.mSampleRate
             }
         }
 
-        // Store raw audio as PCM data for potential later use (export to WAV)
-        let frameLength = Int(buffer.frameLength)
-        let channelCount = Int(buffer.format.channelCount)
+        // Calculate RMS from sample buffer
+        if let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) {
+            var length = 0
+            var dataPointer: UnsafeMutablePointer<Int8>?
+            let status = CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
 
-        if let channelData = buffer.floatChannelData {
-            var data = Data()
-            for channel in 0..<channelCount {
-                let frames = UnsafeBufferPointer(start: channelData[channel], count: frameLength)
-                withUnsafeBytes(of: frames) { data.append(contentsOf: $0) }
+            if status == kCMBlockBufferNoErr, let ptr = dataPointer {
+                let frameCount = length / MemoryLayout<Float32>.size
+                if frameCount > 0 {
+                    let floatPtr = UnsafeRawPointer(ptr).bindMemory(to: Float32.self, capacity: frameCount)
+                    var sum: Float = 0
+                    for i in 0..<frameCount {
+                        sum += floatPtr[i] * floatPtr[i]
+                    }
+                    let rms = sqrtf(sum / Float(frameCount))
+
+                    DispatchQueue.main.async { [weak self] in
+                        self?.audioLevel = rms
+                    }
+
+                    // Store raw audio data
+                    let data = Data(bytes: ptr, count: length)
+                    audioBuffer.append(data)
+                }
             }
-            audioBuffer.append(data)
         }
     }
+}
 
+// MARK: - Fallback for older macOS (not used — Package.swift requires macOS 13+)
+
+extension SystemAudioCapture {
     /// Export captured audio as WAV data (for transcription APIs)
     func exportWAV() -> Data? {
         guard !audioBuffer.isEmpty else {
-            // Try last captured WAV data
             return lastCapturedWAV
         }
 
-        // Simple WAV header + PCM data
         let totalDataSize = audioBuffer.reduce(0) { $0 + $1.count }
         let header = WAVHeader(
             sampleRate: UInt32(sampleRate),
-            channels: 1,
-            bitsPerSample: 16,
+            channels: 2,
+            bitsPerSample: 32,
             dataSize: UInt32(totalDataSize)
         )
 
@@ -135,8 +166,8 @@ private struct WAVHeader {
         header.append(contentsOf: [UInt8]("WAVE".utf8))
         // fmt chunk
         header.append(contentsOf: [UInt8]("fmt ".utf8))
-        header.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) })  // chunk size
-        header.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })   // PCM format
+        header.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) })
+        header.append(contentsOf: withUnsafeBytes(of: UInt16(3).littleEndian) { Array($0) })  // IEEE float
         header.append(contentsOf: withUnsafeBytes(of: channels.littleEndian) { Array($0) })
         header.append(contentsOf: withUnsafeBytes(of: sampleRate.littleEndian) { Array($0) })
         let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample) / 8

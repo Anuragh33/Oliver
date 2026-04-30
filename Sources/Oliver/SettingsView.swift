@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("autoCapture") private var autoCapture = false
     @AppStorage("captureInterval") private var captureInterval = 30.0
     @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @AppStorage("invisibleToSharing") private var invisibleToSharing = true
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
 
     var body: some View {
@@ -30,7 +31,8 @@ struct SettingsView: View {
                 overlayOpacity: $overlayOpacity,
                 overlayWidth: $overlayWidth,
                 autoCapture: $autoCapture,
-                captureInterval: $captureInterval
+                captureInterval: $captureInterval,
+                invisibleToSharing: $invisibleToSharing
             )
             .tabItem { Label("Overlay", systemImage: "uiwindow.split.2x1") }
         }
@@ -45,9 +47,15 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Toggle("Launch at Login", isOn: $launchAtLogin)
+                .disabled(!LaunchAtLoginManager.isRunningAsApp)
                 .onChange(of: launchAtLogin) { newValue in
                     updateLaunchAtLogin(newValue)
                 }
+            if !LaunchAtLoginManager.isRunningAsApp {
+                Text("Only available when running as .app bundle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             Toggle("Show in Menu Bar", isOn: $showMenuBarIcon)
         }
         .padding()
@@ -94,6 +102,7 @@ struct OverlaySettingsView: View {
     @Binding var overlayWidth: Double
     @Binding var autoCapture: Bool
     @Binding var captureInterval: Double
+    @Binding var invisibleToSharing: Bool
 
     var body: some View {
         Form {
@@ -108,6 +117,12 @@ struct OverlaySettingsView: View {
                 Slider(value: $captureInterval, in: 10...120, step: 10) {
                     Text("Capture interval (sec)")
                 }
+            }
+            Toggle("Invisible to Screen Sharing", isOn: $invisibleToSharing)
+            if !invisibleToSharing {
+                Text("Overlay will be visible to Zoom, Meet, Teams, etc.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
             }
         }
         .padding()

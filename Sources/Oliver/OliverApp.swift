@@ -62,7 +62,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Menu bar controller
         guard let window = overlayWindow else { return }
-        menuBarController = MenuBarController(overlayWindow: window)
+        menuBarController = MenuBarController(
+            overlayWindow: window,
+            captureAction: { [weak self] in self?.captureAndQuery() }
+        )
 
         // Register global hotkeys
         hotkeyManager = HotkeyManager()

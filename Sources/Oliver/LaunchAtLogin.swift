@@ -9,17 +9,36 @@ class LaunchAtLoginManager: ObservableObject {
         }
     }
 
+    /// Whether the app is running as a proper .app bundle (not via swift run)
+    static var isRunningAsApp: Bool {
+        let bundlePath = Bundle.main.bundlePath
+        return bundlePath.hasSuffix(".app")
+    }
+
     init() {
+        // Skip login item management if not running as a proper app bundle
+        guard Self.isRunningAsApp else {
+            isEnabled = false
+            print("[LaunchAtLogin] Not running as .app bundle — launch-at-login disabled")
+            return
+        }
+
         // Check current status
         if #available(macOS 13.0, *) {
             isEnabled = (SMAppService.mainApp.status == .enabled)
         } else {
-            // Fallback: check via shared file list (older macOS)
             isEnabled = Self.isInLoginItemsLegacy()
         }
     }
 
     private func updateLoginItem() {
+        // Only work when running as a proper .app bundle
+        guard Self.isRunningAsApp else {
+            print("[LaunchAtLogin] Cannot register login item — not running as .app bundle")
+            isEnabled = false
+            return
+        }
+
         if #available(macOS 13.0, *) {
             do {
                 if isEnabled {
@@ -34,7 +53,6 @@ class LaunchAtLoginManager: ObservableObject {
                 isEnabled = !isEnabled // revert
             }
         } else {
-            // Fallback for older macOS
             Self.setLoginItemLegacy(enabled: isEnabled)
         }
     }

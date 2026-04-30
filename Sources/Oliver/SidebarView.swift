@@ -116,7 +116,7 @@ struct SidebarView: View {
                 }
             }
 
-            Text("v1.2.1")
+            Text("v1.3.0")
                 .font(.system(size: 9))
                 .foregroundStyle(.white.opacity(0.3))
         }

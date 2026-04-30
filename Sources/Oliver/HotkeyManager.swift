@@ -18,8 +18,10 @@ class HotkeyManager {
             guard let self = self else { return }
 
             // Local monitor — catches events when our app IS focused
+            // Only trigger on initial key press (not repeats) and when no text field is first responder
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                if self?.handleKeyEvent(event) == true {
+                guard let self = self else { return event }
+                if self.handleKeyEvent(event, isLocal: true) {
                     return nil // consumed
                 }
                 return event
@@ -27,16 +29,30 @@ class HotkeyManager {
 
             // Global monitor — catches events when our app is NOT focused
             NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                self?.handleKeyEvent(event)
+                _ = self?.handleKeyEvent(event, isLocal: false)
             }
         }
     }
 
     /// Returns true if the event was consumed (shortcut triggered)
-    private func handleKeyEvent(_ event: NSEvent) -> Bool {
+    private func handleKeyEvent(_ event: NSEvent, isLocal: Bool) -> Bool {
+        // Ignore key repeats (holding down the key)
+        guard !event.isARepeat else { return false }
+
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         guard mods.contains(.command) && mods.contains(.shift) else { return false }
+
+        // In local monitor (overlay is focused), only trigger if first responder
+        // is NOT a text input field. This prevents hotkeys from firing while typing.
+        if isLocal {
+            guard let window = event.window else { return false }
+            // If first responder responds to text input actions, skip hotkey
+            if let responder = window.firstResponder as? NSView,
+               responder.responds(to: #selector(NSText.insertText(_:))) {
+                return false
+            }
+        }
 
         // keyCode 4 = H, keyCode 8 = C
         switch event.keyCode {
