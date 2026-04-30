@@ -34,20 +34,23 @@ class MenuBarController {
         statusItem?.button?.image = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: "Oliver")
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Show/Hide Overlay", action: #selector(toggleOverlay), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Capture Screen", action: #selector(captureScreen), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About Oliver", action: #selector(showAbout), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Oliver", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(withTitle: "Show/Hide Overlay", action: #selector(toggleOverlay), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Capture Screen", action: #selector(captureScreen), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+
+        let settingsItem = menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "About Oliver", action: #selector(showAbout), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit Oliver", action: #selector(quitApp), keyEquivalent: "q").target = self
 
         statusItem?.menu = menu
     }
 
     private func hideStatusBarIcon() {
-        statusItem = nil  // Removing the reference removes it from the bar
+        statusItem = nil
     }
 
     @objc private func menuBarPrefChanged() {
@@ -66,7 +69,10 @@ class MenuBarController {
     }
 
     @objc private func openSettings() {
+        // Open the app's Settings window directly
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        // Fallback: activate the app to ensure the settings window appears
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func captureScreen() {
@@ -80,8 +86,8 @@ class MenuBarController {
 
     @objc private func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "Oliver"
-        alert.informativeText = "AI-powered overlay assistant\nInvisible to screen sharing\n\nBuilt with love by Anuragh\nv1.3.0\n\nPress Cmd+Shift+H to show/hide the overlay"
+        alert.messageText = "Oliver v1.3.0"
+        alert.informativeText = "AI-powered overlay assistant\nInvisible to screen sharing\n\nBuilt with love by Anuragh"
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
