@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct OliverApp: App {
@@ -82,14 +83,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Setup auto-capture timer (watches UserDefaults for changes)
         setupAutoCaptureTimer()
 
-        // DON'T auto-show the overlay — start hidden!
-        // User presses Cmd+Shift+H to show it. This prevents the full-screen
-        // transparent window from blocking all interaction on launch.
+        // Request notification permission for launch alerts
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if !granted {
+                print("[Oliver] Notification permission denied")
+            }
+        }
 
-        print("[Oliver] App launched successfully!")
-        print("[Oliver] Hotkeys: Cmd+Shift+H = toggle, Cmd+Shift+C = capture")
-        print("[Oliver] Overlay is invisible to screen sharing (sharingType = .none)")
-        print("[Oliver] Press Cmd+Shift+H to show the overlay")
+        // Show a welcome notification so users know the app is running
+        showLaunchNotification()
+    }
+
+    // MARK: - Launch Notification
+
+    private func showLaunchNotification() {
+        // Always show a visible alert so users know the app started
+        showWelcomeAlert()
+
+        // Also schedule a notification for subsequent launches
+        let isFirstLaunch = !UserDefaults.standard.bool(forKey: "oliver.hasLaunchedBefore")
+        if !isFirstLaunch {
+            let content = UNMutableNotificationContent()
+            content.title = "Oliver is Running"
+            content.body = "Press Cmd+Shift+H to open the overlay."
+            content.sound = nil
+
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1.0, repeats: false)
+            let request = UNNotificationRequest(identifier: "oliver.ready", content: content, trigger: trigger)
+
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("[Oliver] Failed to show notification: \(error)")
+                }
+            }
+        }
+
+        UserDefaults.standard.set(true, forKey: "oliver.hasLaunchedBefore")
+    }
+
+    private func showWelcomeAlert() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let alert = NSAlert()
+            alert.messageText = "Oliver is Running"
+            alert.informativeText = "Oliver lives in your menu bar (eye icon).\n\n• Cmd+Shift+H — Open overlay\n• Cmd+Shift+C — Capture screen\n\nYou can close this alert. Oliver keeps running."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Got it")
+            alert.runModal()
+        }
     }
 
     // MARK: - Permission Checks with Retry
